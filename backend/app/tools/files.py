@@ -2,7 +2,7 @@ import os
 import re
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ..config import get_settings
 from ..models import File
@@ -15,6 +15,16 @@ def _safe_filename(name: str) -> str:
     name = os.path.basename(name).strip()
     name = re.sub(r"[^A-Za-z0-9._ -]", "_", name)
     return name or "untitled.md"
+
+
+async def next_file_version(db, session_id: str, filename: str) -> int:
+    """Next version for a filename in a session, across uploads and artifacts."""
+    result = await db.execute(
+        select(func.coalesce(func.max(File.version), 0)).where(
+            File.session_id == session_id, File.filename == filename
+        )
+    )
+    return result.scalar_one() + 1
 
 
 def artifact_storage_path(file_id: str, filename: str) -> str:
@@ -45,14 +55,7 @@ class WriteFileTool:
             filename += ".md"
         content: str = args["content"]
 
-        prev = await ctx.db.execute(
-            select(File)
-            .where(File.session_id == ctx.session_id, File.filename == filename)
-            .order_by(File.version.desc())
-            .limit(1)
-        )
-        prev_row = prev.scalar_one_or_none()
-        version = (prev_row.version + 1) if prev_row else 1
+        version = await next_file_version(ctx.db, ctx.session_id, filename)
 
         file_id = uuid.uuid4().hex
         path = artifact_storage_path(file_id, filename)

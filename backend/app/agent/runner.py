@@ -155,12 +155,20 @@ async def _run(session_id: str, user_id: str, run_id: str) -> None:
             if not result.tool_calls:
                 break
 
-            tool_results = await asyncio.gather(
+            # return_exceptions=True lets every tool task run to completion even
+            # if one fails, so no sibling task is left running detached.
+            gathered = await asyncio.gather(
                 *[
                     _execute_tool(tools, tc, session_id, user_id, emit)
                     for tc in result.tool_calls
-                ]
+                ],
+                return_exceptions=True,
             )
+            tool_results: list[ToolResult] = []
+            for item in gathered:
+                if isinstance(item, BaseException):
+                    raise item
+                tool_results.append(item)
             for tc, tr in zip(result.tool_calls, tool_results, strict=True):
                 content = tr.content
                 if len(content) > settings.tool_result_max_chars:
