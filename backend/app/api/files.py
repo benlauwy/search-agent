@@ -1,3 +1,5 @@
+import contextlib
+import os
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
@@ -107,21 +109,27 @@ async def upload_file(
     with open(path, "wb") as f:
         f.write(raw)
 
-    async with file_version_lock:
-        row = File(
-            id=file_id,
-            session_id=session.id,
-            user_id=user.id,
-            kind="upload",
-            filename=filename,
-            mime=file.content_type or "text/plain",
-            size=len(raw),
-            version=await next_file_version(db, session.id, filename),
-            path=path,
-            extracted_text=text,
-        )
-        db.add(row)
-        await db.commit()
+    try:
+        async with file_version_lock:
+            row = File(
+                id=file_id,
+                session_id=session.id,
+                user_id=user.id,
+                kind="upload",
+                filename=filename,
+                mime=file.content_type or "text/plain",
+                size=len(raw),
+                version=await next_file_version(db, session.id, filename),
+                path=path,
+                extracted_text=text,
+            )
+            db.add(row)
+            await db.commit()
+    except BaseException:
+        # The row never landed, so the on-disk file would be unreachable.
+        with contextlib.suppress(OSError):
+            os.unlink(path)
+        raise
     return _file_dict(row)
 
 

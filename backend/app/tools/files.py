@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import os
 import re
 import uuid
@@ -66,22 +67,28 @@ class WriteFileTool:
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
 
-        async with file_version_lock:
-            version = await next_file_version(ctx.db, ctx.session_id, filename)
-            row = File(
-                id=file_id,
-                session_id=ctx.session_id,
-                user_id=ctx.user_id,
-                kind="artifact",
-                filename=filename,
-                mime="text/markdown" if filename.lower().endswith(".md") else "text/plain",
-                size=len(content.encode()),
-                version=version,
-                path=path,
-                extracted_text=content,
-            )
-            ctx.db.add(row)
-            await ctx.db.commit()
+        try:
+            async with file_version_lock:
+                version = await next_file_version(ctx.db, ctx.session_id, filename)
+                row = File(
+                    id=file_id,
+                    session_id=ctx.session_id,
+                    user_id=ctx.user_id,
+                    kind="artifact",
+                    filename=filename,
+                    mime="text/markdown" if filename.lower().endswith(".md") else "text/plain",
+                    size=len(content.encode()),
+                    version=version,
+                    path=path,
+                    extracted_text=content,
+                )
+                ctx.db.add(row)
+                await ctx.db.commit()
+        except BaseException:
+            # The row never landed, so the on-disk file would be unreachable.
+            with contextlib.suppress(OSError):
+                os.unlink(path)
+            raise
         await ctx.emit(
             "artifact_created",
             {"file_id": file_id, "filename": filename, "version": version, "size": row.size},
