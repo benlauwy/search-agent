@@ -136,10 +136,11 @@ export function useChat(sessionId: string | null) {
     async (text: string) => {
       if (!sessionId) return
       setError(null)
+      const pendingId = localId()
       setMessages((msgs) => [
         ...msgs,
         {
-          id: localId(),
+          id: pendingId,
           idx: msgs.length,
           role: 'user',
           text,
@@ -154,6 +155,7 @@ export function useChat(sessionId: string | null) {
       try {
         await api.sendMessage(sessionId, text)
       } catch (e) {
+        setMessages((msgs) => msgs.filter((m) => m.id !== pendingId))
         setRunning(false)
         setError(e instanceof Error ? e.message : String(e))
       }
