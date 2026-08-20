@@ -110,14 +110,15 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
 async def login(response: Response):
     provider = get_auth_provider()
     state = secrets.token_urlsafe(24)
+    nonce = secrets.token_urlsafe(24)
     if isinstance(provider, OIDCProvider):
-        url = await provider.authorize_url_async(_redirect_uri(), state)
+        url = await provider.authorize_url_async(_redirect_uri(), state, nonce)
     else:
         url = provider.authorize_url(_redirect_uri(), state)
     redirect = RedirectResponse(url)
     redirect.set_cookie(
         STATE_COOKIE,
-        state,
+        f"{state}.{nonce}",
         max_age=600,
         httponly=True,
         samesite="lax",
@@ -133,11 +134,15 @@ async def callback(
     state: str = "",
     db: AsyncSession = Depends(get_db),
 ):
-    expected_state = request.cookies.get(STATE_COOKIE)
+    cookie = request.cookies.get(STATE_COOKIE) or ""
+    expected_state, _, nonce = cookie.partition(".")
     if not expected_state or expected_state != state:
         raise HTTPException(400, "Invalid OAuth state")
     provider = get_auth_provider()
-    identity = await provider.exchange_code(code, _redirect_uri())
+    if isinstance(provider, OIDCProvider):
+        identity = await provider.exchange_code(code, _redirect_uri(), nonce or None)
+    else:
+        identity = await provider.exchange_code(code, _redirect_uri())
     user = await _upsert_user(db, identity)
     redirect = RedirectResponse(get_settings().app_url)
     redirect.delete_cookie(STATE_COOKIE)

@@ -66,7 +66,14 @@ def turn_from_message_row(row) -> ChatTurn:
     return ChatTurn(
         role=row.role,
         text=row.text or "",
-        reasoning=[ReasoningBlock(**b) for b in (row.reasoning_json or [])],
+        reasoning=[
+            ReasoningBlock(
+                provider=b.get("provider", ""),
+                payload=b.get("payload", {}),
+                display_text=b.get("display_text", ""),
+            )
+            for b in (row.reasoning_json or [])
+        ],
         tool_calls=[ToolCall(**t) for t in (row.tool_calls_json or [])],
         tool_call_id=row.tool_call_id,
         tool_name=row.tool_name,

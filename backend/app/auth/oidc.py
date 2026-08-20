@@ -45,7 +45,7 @@ class OIDCProvider:
                 self._jwks = resp.json()
         return self._jwks
 
-    async def authorize_url_async(self, redirect_uri: str, state: str) -> str:
+    async def authorize_url_async(self, redirect_uri: str, state: str, nonce: str) -> str:
         meta = await self._discover()
         params = {
             "client_id": self.client_id,
@@ -53,6 +53,7 @@ class OIDCProvider:
             "response_type": "code",
             "scope": self.scopes,
             "state": state,
+            "nonce": nonce,
         }
         return f"{meta['authorization_endpoint']}?{urlencode(params)}"
 
@@ -60,7 +61,9 @@ class OIDCProvider:
         # Sync wrapper used only when metadata is already cached; routes use the async variant.
         raise NotImplementedError("use authorize_url_async")
 
-    async def exchange_code(self, code: str, redirect_uri: str) -> Identity:
+    async def exchange_code(
+        self, code: str, redirect_uri: str, nonce: str | None = None
+    ) -> Identity:
         meta = await self._discover()
         async with httpx.AsyncClient() as client:
             resp = await client.post(
@@ -77,11 +80,14 @@ class OIDCProvider:
             tokens = resp.json()
         key_set = KeySet.import_key_set(await self._get_jwks())
         token = jwt.decode(tokens["id_token"], key_set)
-        registry = jwt.JWTClaimsRegistry(
-            iss={"essential": True, "value": self.issuer},
-            aud={"essential": True, "value": self.client_id},
-            exp={"essential": True},
-        )
+        claim_options: dict = {
+            "iss": {"essential": True, "value": self.issuer},
+            "aud": {"essential": True, "value": self.client_id},
+            "exp": {"essential": True},
+        }
+        if nonce is not None:
+            claim_options["nonce"] = {"essential": True, "value": nonce}
+        registry = jwt.JWTClaimsRegistry(**claim_options)
         registry.validate(token.claims)
         claims = token.claims
         return Identity(

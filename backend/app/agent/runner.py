@@ -48,7 +48,11 @@ async def stop_run(session_id: str) -> None:
         task.cancel()
     try:
         await task
-    except (asyncio.CancelledError, Exception):  # noqa: BLE001
+    except asyncio.CancelledError:
+        current = asyncio.current_task()
+        if current is not None and current.cancelling():
+            raise  # the caller itself was cancelled; don't swallow it
+    except Exception:  # noqa: BLE001 - the run task's own failure is already reported
         pass
 
 
@@ -63,6 +67,28 @@ def start_run(session_id: str, user_id: str) -> str:
 
     task.add_done_callback(_cleanup)
     return run_id
+
+
+def _reconcile_history(history: list[ChatTurn]) -> list[ChatTurn]:
+    """Insert placeholder tool results for assistant tool_calls that were never
+    answered (e.g. the run was cancelled mid-tool); providers reject unanswered
+    tool_calls in the conversation."""
+    answered = {t.tool_call_id for t in history if t.role == "tool" and t.tool_call_id}
+    fixed: list[ChatTurn] = []
+    for turn in history:
+        fixed.append(turn)
+        if turn.role == "assistant":
+            for tc in turn.tool_calls:
+                if tc.id not in answered:
+                    fixed.append(
+                        ChatTurn(
+                            role="tool",
+                            text="[Tool execution was interrupted before completing.]",
+                            tool_call_id=tc.id,
+                            tool_name=tc.name,
+                        )
+                    )
+    return fixed
 
 
 async def _next_idx(db, model, session_id: str) -> int:
@@ -106,7 +132,7 @@ async def _run(session_id: str, user_id: str, run_id: str) -> None:
                     select(Message).where(Message.session_id == session_id).order_by(Message.idx)
                 )
             ).scalars().all()
-            history = [turn_from_message_row(r) for r in rows]
+            history = _reconcile_history([turn_from_message_row(r) for r in rows])
 
         await emit("run_started", {"provider": adapter.name, "model": adapter.model})
 
