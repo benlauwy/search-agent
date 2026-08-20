@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..agent import runner
 from ..auth.routes import get_current_user
 from ..db import get_db
-from ..models import ChatSession, Event, Message, User
+from ..models import ChatSession, Event, Message, User, _now
 from ..providers.registry import PROVIDERS
 from ..settings_store import get_setting
 
@@ -170,6 +170,7 @@ async def send_message(
     db.add(Message(session_id=session.id, idx=idx, role="user", text=text))
     if session.title == "New chat":
         session.title = text[:80]
+    session.updated_at = _now()
     await db.commit()
     run_id = runner.start_run(session.id, user.id)
     return {"run_id": run_id}
