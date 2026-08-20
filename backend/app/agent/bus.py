@@ -23,7 +23,14 @@ class EventBus:
             try:
                 q.put_nowait(event)
             except asyncio.QueueFull:
-                pass
+                # Evict the oldest queued event (typically a stale delta) so the
+                # newest event always lands; control events like run_finished
+                # must reach the client or the UI can get stuck "running".
+                try:
+                    q.get_nowait()
+                    q.put_nowait(event)
+                except (asyncio.QueueEmpty, asyncio.QueueFull):
+                    pass
 
 
 bus = EventBus()

@@ -24,11 +24,25 @@ acting, and give concise, well-structured final answers.\
 """
 
 _active_runs: dict[str, asyncio.Task] = {}
+_reserved_runs: set[str] = set()
 
 
 def is_running(session_id: str) -> bool:
     task = _active_runs.get(session_id)
     return task is not None and not task.done()
+
+
+def try_reserve_run(session_id: str) -> bool:
+    """Atomically claim the run slot for a session (no awaits between check and
+    claim), so concurrent send requests cannot both start a run."""
+    if session_id in _reserved_runs or is_running(session_id):
+        return False
+    _reserved_runs.add(session_id)
+    return True
+
+
+def release_run_reservation(session_id: str) -> None:
+    _reserved_runs.discard(session_id)
 
 
 def cancel_run(session_id: str) -> bool:
@@ -60,6 +74,7 @@ def start_run(session_id: str, user_id: str) -> str:
     run_id = uuid.uuid4().hex
     task = asyncio.create_task(_run(session_id, user_id, run_id))
     _active_runs[session_id] = task
+    _reserved_runs.discard(session_id)
 
     def _cleanup(done: asyncio.Task) -> None:
         if _active_runs.get(session_id) is done:

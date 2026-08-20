@@ -155,24 +155,28 @@ async def send_message(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if runner.is_running(session.id):
-        raise HTTPException(409, "A run is already in progress for this session")
     text = body.text.strip()
     if not text:
         raise HTTPException(400, "Empty message")
-    idx = (
-        await db.execute(
-            select(func.coalesce(func.max(Message.idx), -1)).where(
-                Message.session_id == session.id
+    if not runner.try_reserve_run(session.id):
+        raise HTTPException(409, "A run is already in progress for this session")
+    try:
+        idx = (
+            await db.execute(
+                select(func.coalesce(func.max(Message.idx), -1)).where(
+                    Message.session_id == session.id
+                )
             )
-        )
-    ).scalar_one() + 1
-    db.add(Message(session_id=session.id, idx=idx, role="user", text=text))
-    if session.title == "New chat":
-        session.title = text[:80]
-    session.updated_at = _now()
-    await db.commit()
-    run_id = runner.start_run(session.id, user.id)
+        ).scalar_one() + 1
+        db.add(Message(session_id=session.id, idx=idx, role="user", text=text))
+        if session.title == "New chat":
+            session.title = text[:80]
+        session.updated_at = _now()
+        await db.commit()
+        run_id = runner.start_run(session.id, user.id)
+    except BaseException:
+        runner.release_run_reservation(session.id)
+        raise
     return {"run_id": run_id}
 
 
