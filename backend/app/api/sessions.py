@@ -91,8 +91,7 @@ async def delete_session(
     session: ChatSession = Depends(get_owned_session),
     db: AsyncSession = Depends(get_db),
 ):
-    if runner.is_running(session.id):
-        runner.cancel_run(session.id)
+    await runner.stop_run(session.id)
     from ..models import File
 
     file_paths: list[str] = []
@@ -106,6 +105,7 @@ async def delete_session(
             if model is File and r.path:
                 file_paths.append(r.path)
             await db.delete(r)
+    await db.flush()
     await db.delete(session)
     await db.commit()
     for path in file_paths:

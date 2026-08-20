@@ -39,6 +39,19 @@ def cancel_run(session_id: str) -> bool:
     return False
 
 
+async def stop_run(session_id: str) -> None:
+    """Cancel a session's run (if any) and wait until it has fully stopped."""
+    task = _active_runs.get(session_id)
+    if task is None:
+        return
+    if not task.done():
+        task.cancel()
+    try:
+        await task
+    except (asyncio.CancelledError, Exception):  # noqa: BLE001
+        pass
+
+
 def start_run(session_id: str, user_id: str) -> str:
     run_id = uuid.uuid4().hex
     task = asyncio.create_task(_run(session_id, user_id, run_id))

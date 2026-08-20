@@ -93,7 +93,12 @@ export default function App() {
   }
 
   const deleteSession = async (id: string) => {
-    await api.deleteSession(id)
+    try {
+      await api.deleteSession(id)
+    } catch (e) {
+      alert(`Failed to delete session: ${e instanceof Error ? e.message : e}`)
+      return
+    }
     const list = await loadSessions()
     if (activeId === id) setActiveId(list[0]?.id ?? null)
   }
