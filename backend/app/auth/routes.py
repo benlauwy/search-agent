@@ -28,13 +28,23 @@ def _serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(get_settings().secret_key, salt="session")
 
 
+_provider_cache: DevProvider | OIDCProvider | None = None
+
+
 def get_auth_provider():
+    # Cache the provider instance so OIDC discovery/JWKS fetches are reused
+    # across the login and callback requests.
+    global _provider_cache
+    if _provider_cache is not None:
+        return _provider_cache
     s = get_settings()
     if s.auth_provider == "google":
         if not s.google_client_id or not s.google_client_secret:
             raise HTTPException(500, "Google auth not configured")
-        return google_provider(s.google_client_id, s.google_client_secret)
-    return DevProvider()
+        _provider_cache = google_provider(s.google_client_id, s.google_client_secret)
+    else:
+        _provider_cache = DevProvider()
+    return _provider_cache
 
 
 def _redirect_uri() -> str:

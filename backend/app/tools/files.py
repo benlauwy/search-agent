@@ -65,7 +65,7 @@ class WriteFileTool:
             user_id=ctx.user_id,
             kind="artifact",
             filename=filename,
-            mime="text/markdown" if filename.endswith(".md") else "text/plain",
+            mime="text/markdown" if filename.lower().endswith(".md") else "text/plain",
             size=len(content.encode()),
             version=version,
             path=path,
