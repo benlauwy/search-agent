@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -93,6 +95,7 @@ async def delete_session(
         runner.cancel_run(session.id)
     from ..models import File
 
+    file_paths: list[str] = []
     for model in (Message, Event, File):
         rows = (
             (await db.execute(select(model).where(model.session_id == session.id)))
@@ -100,9 +103,16 @@ async def delete_session(
             .all()
         )
         for r in rows:
+            if model is File and r.path:
+                file_paths.append(r.path)
             await db.delete(r)
     await db.delete(session)
     await db.commit()
+    for path in file_paths:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
     return {"ok": True}
 
 
