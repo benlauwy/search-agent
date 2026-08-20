@@ -82,9 +82,16 @@ async def upload_file(
             "Unsupported file type. Only text files (e.g. .txt, .md, .csv, .json) "
             "are supported for now.",
         )
-    raw = await file.read()
-    if len(raw) > settings.max_upload_bytes:
-        raise HTTPException(413, f"File too large (max {settings.max_upload_bytes} bytes)")
+    # Read in bounded chunks so oversized uploads are rejected before the
+    # whole body is materialized in memory.
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(65536):
+        total += len(chunk)
+        if total > settings.max_upload_bytes:
+            raise HTTPException(413, f"File too large (max {settings.max_upload_bytes} bytes)")
+        chunks.append(chunk)
+    raw = b"".join(chunks)
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as e:
