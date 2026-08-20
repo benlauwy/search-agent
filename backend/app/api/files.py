@@ -9,7 +9,12 @@ from ..auth.routes import get_current_user
 from ..config import get_settings
 from ..db import get_db
 from ..models import ChatSession, File, User
-from ..tools.files import _safe_filename, artifact_storage_path, next_file_version
+from ..tools.files import (
+    _safe_filename,
+    artifact_storage_path,
+    file_version_lock,
+    next_file_version,
+)
 from .sessions import get_owned_session
 
 router = APIRouter(prefix="/api", tags=["files"])
@@ -102,20 +107,21 @@ async def upload_file(
     with open(path, "wb") as f:
         f.write(raw)
 
-    row = File(
-        id=file_id,
-        session_id=session.id,
-        user_id=user.id,
-        kind="upload",
-        filename=filename,
-        mime=file.content_type or "text/plain",
-        size=len(raw),
-        version=await next_file_version(db, session.id, filename),
-        path=path,
-        extracted_text=text,
-    )
-    db.add(row)
-    await db.commit()
+    async with file_version_lock:
+        row = File(
+            id=file_id,
+            session_id=session.id,
+            user_id=user.id,
+            kind="upload",
+            filename=filename,
+            mime=file.content_type or "text/plain",
+            size=len(raw),
+            version=await next_file_version(db, session.id, filename),
+            path=path,
+            extracted_text=text,
+        )
+        db.add(row)
+        await db.commit()
     return _file_dict(row)
 
 

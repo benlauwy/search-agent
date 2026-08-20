@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 import uuid
@@ -9,6 +10,11 @@ from ..models import File
 from .base import ToolContext, ToolResult
 
 ALLOWED_ARTIFACT_EXTENSIONS = (".md", ".txt")
+
+# Serializes version allocation + insert so concurrent writes/uploads of the
+# same filename cannot both claim the same version number (single-process
+# deployment assumption).
+file_version_lock = asyncio.Lock()
 
 
 def _safe_filename(name: str) -> str:
@@ -55,27 +61,27 @@ class WriteFileTool:
             filename += ".md"
         content: str = args["content"]
 
-        version = await next_file_version(ctx.db, ctx.session_id, filename)
-
         file_id = uuid.uuid4().hex
         path = artifact_storage_path(file_id, filename)
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
 
-        row = File(
-            id=file_id,
-            session_id=ctx.session_id,
-            user_id=ctx.user_id,
-            kind="artifact",
-            filename=filename,
-            mime="text/markdown" if filename.lower().endswith(".md") else "text/plain",
-            size=len(content.encode()),
-            version=version,
-            path=path,
-            extracted_text=content,
-        )
-        ctx.db.add(row)
-        await ctx.db.commit()
+        async with file_version_lock:
+            version = await next_file_version(ctx.db, ctx.session_id, filename)
+            row = File(
+                id=file_id,
+                session_id=ctx.session_id,
+                user_id=ctx.user_id,
+                kind="artifact",
+                filename=filename,
+                mime="text/markdown" if filename.lower().endswith(".md") else "text/plain",
+                size=len(content.encode()),
+                version=version,
+                path=path,
+                extracted_text=content,
+            )
+            ctx.db.add(row)
+            await ctx.db.commit()
         await ctx.emit(
             "artifact_created",
             {"file_id": file_id, "filename": filename, "version": version, "size": row.size},
