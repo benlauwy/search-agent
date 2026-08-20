@@ -1,10 +1,11 @@
 """Fireworks adapter (OpenAI Chat Completions-compatible API).
 
 Reasoning models return `reasoning_content` on assistant messages. For
-multi-turn tool calling, prior assistant turns must include their
-`reasoning_content` so the model can continue its reasoning after tool
-results (interleaved thinking). Models without reasoning support ignore
-the extra field, so it is always included when present.
+multi-turn tool calling, assistant turns in the active tool loop (after the
+latest user message) must include their `reasoning_content` so the model can
+continue its reasoning after tool results (interleaved thinking). Reasoning
+from earlier, completed rounds is dropped per provider convention. Models
+without reasoning support ignore the extra field.
 """
 
 import json
@@ -26,12 +27,19 @@ class FireworksAdapter:
 
     def _build_messages(self, system_prompt: str, history: list[ChatTurn]) -> list[dict]:
         messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
-        for turn in history:
+        last_user_idx = max(
+            (i for i, t in enumerate(history) if t.role == "user"), default=-1
+        )
+        for i, turn in enumerate(history):
             if turn.role == "user":
                 messages.append({"role": "user", "content": turn.text})
             elif turn.role == "assistant":
                 msg: dict[str, Any] = {"role": "assistant", "content": turn.text or ""}
-                own_reasoning = [b for b in turn.reasoning if b.provider == self.name]
+                own_reasoning = (
+                    [b for b in turn.reasoning if b.provider == self.name]
+                    if i > last_user_idx
+                    else []
+                )
                 if own_reasoning:
                     msg["reasoning_content"] = "\n".join(
                         b.payload.get("reasoning_content", "") for b in own_reasoning
