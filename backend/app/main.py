@@ -11,6 +11,9 @@ from .db import init_db
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    s = get_settings()
+    if s.auth_provider != "dev" and s.secret_key == "dev-secret-change-me":
+        raise RuntimeError("SA_SECRET_KEY must be set to a strong random value in production")
     await init_db()
     yield
 

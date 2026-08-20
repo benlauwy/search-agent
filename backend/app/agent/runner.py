@@ -43,6 +43,12 @@ def start_run(session_id: str, user_id: str) -> str:
     run_id = uuid.uuid4().hex
     task = asyncio.create_task(_run(session_id, user_id, run_id))
     _active_runs[session_id] = task
+
+    def _cleanup(done: asyncio.Task) -> None:
+        if _active_runs.get(session_id) is done:
+            del _active_runs[session_id]
+
+    task.add_done_callback(_cleanup)
     return run_id
 
 
@@ -59,6 +65,8 @@ async def _run(session_id: str, user_id: str, run_id: str) -> None:
 
     async def emit(event_type: str, payload: dict) -> None:
         nonlocal event_idx
+        idx = event_idx
+        event_idx += 1
         event = {"type": event_type, "run_id": run_id, "payload": payload}
         await bus.publish(session_id, event)
         async with SessionLocal() as edb:
@@ -66,13 +74,12 @@ async def _run(session_id: str, user_id: str, run_id: str) -> None:
                 Event(
                     session_id=session_id,
                     run_id=run_id,
-                    idx=event_idx,
+                    idx=idx,
                     type=event_type,
                     payload_json=payload,
                 )
             )
             await edb.commit()
-        event_idx += 1
 
     try:
         async with SessionLocal() as db:

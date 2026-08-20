@@ -20,6 +20,10 @@ STATE_COOKIE = "sa_oauth_state"
 SESSION_MAX_AGE = 60 * 60 * 24 * 14  # 14 days
 
 
+def _secure_cookies() -> bool:
+    return get_settings().app_url.startswith("https://")
+
+
 def _serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(get_settings().secret_key, salt="session")
 
@@ -74,6 +78,7 @@ def _set_session_cookie(response: Response, user_id: str) -> None:
         max_age=SESSION_MAX_AGE,
         httponly=True,
         samesite="lax",
+        secure=_secure_cookies(),
     )
 
 
@@ -100,7 +105,14 @@ async def login(response: Response):
     else:
         url = provider.authorize_url(_redirect_uri(), state)
     redirect = RedirectResponse(url)
-    redirect.set_cookie(STATE_COOKIE, state, max_age=600, httponly=True, samesite="lax")
+    redirect.set_cookie(
+        STATE_COOKIE,
+        state,
+        max_age=600,
+        httponly=True,
+        samesite="lax",
+        secure=_secure_cookies(),
+    )
     return redirect
 
 
