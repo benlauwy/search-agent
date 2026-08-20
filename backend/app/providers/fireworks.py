@@ -104,6 +104,8 @@ class FireworksAdapter:
                     if not line.startswith("data:"):
                         continue
                     data = line[5:].strip()
+                    if not data:
+                        continue
                     if data == "[DONE]":
                         break
                     chunk = json.loads(data)
