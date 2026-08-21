@@ -140,7 +140,20 @@ files(id, session_id, user_id, kind[upload|artifact], filename, mime, size, vers
 
 Roughly: milestones 1–2 in one session, 3–4 in a second, 5 as follow-up.
 
-## 10. Open Questions
+## 10. Learnings from Milestones 1–2 (things that give pause)
+
+Design notes from execution and review that should shape milestones 3–5:
+
+1. **The single-process assumption is now load-bearing, not just convenient.** Three separate mechanisms rely on in-process state: the atomic run-slot reservation (prevents duplicate concurrent runs per session), the `file_version_lock` (serializes filename version allocation across uploads and artifacts), and the in-memory SSE event bus. Running multiple uvicorn workers silently breaks all three. Milestone 4's subagents multiply in-process concurrency but stay correct; **scale-out beyond one process** would need Postgres advisory locks (run slots, file versions) and LISTEN/NOTIFY or Redis pub/sub (events). Keep v1 single-process and document it loudly in deployment (§9 M5).
+2. **Cancellation corrupts provider history unless reconciled.** A run cancelled between persisting an assistant message with `tool_calls` and persisting the tool results leaves unanswered `tool_calls` in history — all three providers 400 on this, permanently bricking the session. The loader now inserts placeholder tool results (`_reconcile_history`). Subagent runs (M4) must reuse the same loader; any new persistence path must keep the assistant-message-then-results ordering.
+3. **Reasoning replay must be scoped to the active tool loop.** Replaying reasoning blocks from all prior completed turns bloats requests and is unnecessary: providers only *require* reasoning continuity within the current tool loop (assistant turns after the latest user message). The Fireworks adapter now replays only those; the OpenAI/Anthropic adapters (M3) should follow the same rule — it also matches OpenAI's "replay output items since the last user message" guidance in §4.
+4. **SQLite is dev-only in practice.** Parallel tool execution + event persistence opens several concurrent write sessions; SQLite's single-writer model produces `database is locked` under exactly the workloads M4 makes common. A busy-timeout is configured as a mitigation, but treat Postgres as required for anything beyond single-user dev.
+5. **Live SSE deltas are lossy by design; the events table is the trace.** Per-subscriber queues are bounded (evict-oldest on overflow), so token deltas can drop under backpressure while persisted events/messages remain complete. Consequence for M4: the parent's trace view and `trace_session` must read from the events table, never from the live bus.
+6. **Provider model names churn.** The originally chosen Fireworks default 404'd mid-build (model deprecated). Also, saving Settings persists the then-current defaults as explicit DB rows, so code-default changes only affect fresh installs. Expect to re-verify model IDs each milestone; consider a "model unavailable" health check surfaced in Settings rather than failing mid-run.
+7. **Uploads and artifacts share one filename/version namespace.** `read_file` resolves the highest version regardless of kind, so an artifact can shadow a same-named upload (and vice-versa). Acceptable for v1, but revisit before corpus ingestion (§8) keys anything on filename — an explicit `kind` disambiguator or separate namespaces may be needed.
+8. **Disk + DB writes are not transactional.** Files are written to disk before their DB row commits; on commit failure the file is unlinked (best-effort). There's no true atomicity — a crash between write and commit still orphans a file. Fine at this scale; a startup sweep of unreferenced files is the cheap fix if it ever matters.
+
+## 11. Open Questions
 
 1. Frontend preference — plain React+Vite SPA (proposed) vs Next.js?
 2. Should subagent sessions appear in the user's session list, or only inside the parent's trace view (proposed)?
