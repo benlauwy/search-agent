@@ -19,8 +19,17 @@ SYSTEM_PROMPT = """\
 You are a research assistant with tools. Work in steps: search the web when you \
 need current or factual information, read files the user uploaded when relevant, \
 and write Markdown files when the user asks for a document or report they can \
-download. Cite source URLs when you use web results. Think carefully before \
+download. For research that splits into independent parts, use spawn_subagents \
+to run them in parallel. Use trace_session to inspect another session the user \
+links to. Cite source URLs when you use web results. Think carefully before \
 acting, and give concise, well-structured final answers.\
+"""
+
+SUBAGENT_SYSTEM_PROMPT = """\
+You are a subagent handling one focused sub-task for a parent research agent. \
+Use your tools (web search, file read/write) as needed, then produce a single \
+self-contained final answer: it is returned to the parent verbatim, so include \
+all relevant findings and source URLs. Do not ask questions back.\
 """
 
 _active_runs: dict[str, asyncio.Task] = {}
@@ -113,9 +122,19 @@ async def _next_idx(db, model, session_id: str) -> int:
     return result.scalar_one() + 1
 
 
-async def _run(session_id: str, user_id: str, run_id: str) -> None:
+async def run_subagent(session_id: str, user_id: str) -> str | None:
+    """Run a subagent session to completion; returns its final answer text,
+    or None if the run failed before producing one. Runs inline in the parent
+    run's task, so cancelling the parent cancels its subagents."""
+    return await _run(session_id, user_id, uuid.uuid4().hex, subagent=True)
+
+
+async def _run(
+    session_id: str, user_id: str, run_id: str, subagent: bool = False
+) -> str | None:
     settings = get_settings()
     event_idx = 0
+    final_text: str | None = None
 
     async def emit(event_type: str, payload: dict) -> None:
         nonlocal event_idx
@@ -138,8 +157,8 @@ async def _run(session_id: str, user_id: str, run_id: str) -> None:
     try:
         async with SessionLocal() as db:
             session = await db.get(ChatSession, session_id)
-            adapter = await build_adapter(db, session.provider, session.model)
-            tools = build_tools()
+            adapter = await build_adapter(db, session.provider, session.model, subagent=subagent)
+            tools = build_tools(subagent=subagent)
             schemas = tool_schemas(tools)
 
             rows = (
@@ -151,7 +170,9 @@ async def _run(session_id: str, user_id: str, run_id: str) -> None:
 
         await emit("run_started", {"provider": adapter.name, "model": adapter.model})
 
-        for _step in range(settings.max_steps_per_run):
+        system_prompt = SUBAGENT_SYSTEM_PROMPT if subagent else SYSTEM_PROMPT
+        max_steps = settings.max_steps_per_subagent_run if subagent else settings.max_steps_per_run
+        for _step in range(max_steps):
             async def on_delta(delta: StreamDelta) -> None:
                 await bus.publish(
                     session_id,
@@ -162,7 +183,7 @@ async def _run(session_id: str, user_id: str, run_id: str) -> None:
                     },
                 )
 
-            result = await adapter.stream_completion(SYSTEM_PROMPT, history, schemas, on_delta)
+            result = await adapter.stream_completion(system_prompt, history, schemas, on_delta)
 
             assistant_turn = ChatTurn(
                 role="assistant",
@@ -194,6 +215,7 @@ async def _run(session_id: str, user_id: str, run_id: str) -> None:
             )
 
             if not result.tool_calls:
+                final_text = result.text
                 break
 
             # return_exceptions=True lets every tool task run to completion even
@@ -243,6 +265,7 @@ async def _run(session_id: str, user_id: str, run_id: str) -> None:
     except Exception as e:  # noqa: BLE001 - surface any failure to the client
         await emit("error", {"message": str(e)[:2000]})
         await emit("run_finished", {"failed": True})
+    return final_text
 
 
 async def _execute_tool(tools, tool_call, session_id: str, user_id: str, emit) -> ToolResult:
@@ -256,15 +279,16 @@ async def _execute_tool(tools, tool_call, session_id: str, user_id: str, emit) -
         result = ToolResult(f"Unknown tool: {tool_call.name}", is_error=True)
     else:
         try:
+            timeout = tool.timeout_seconds or settings.tool_timeout_seconds
             async with SessionLocal() as db:
                 ctx = ToolContext(db=db, session_id=session_id, user_id=user_id, emit=emit)
                 result = await asyncio.wait_for(
                     tool.execute(tool_call.arguments, ctx),
-                    timeout=settings.tool_timeout_seconds,
+                    timeout=timeout,
                 )
         except TimeoutError:
             result = ToolResult(
-                f"Tool {tool_call.name} timed out after {settings.tool_timeout_seconds}s",
+                f"Tool {tool_call.name} timed out after {timeout}s",
                 is_error=True,
             )
         except asyncio.CancelledError:

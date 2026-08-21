@@ -50,6 +50,7 @@ class CompletionResult:
 
 class ProviderAdapter(Protocol):
     name: str
+    model: str
 
     async def stream_completion(
         self,

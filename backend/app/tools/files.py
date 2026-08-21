@@ -55,6 +55,7 @@ class WriteFileTool:
         },
         "required": ["filename", "content"],
     }
+    timeout_seconds: int | None = None
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         filename = _safe_filename(args["filename"])
@@ -117,6 +118,7 @@ class ReadFileTool:
         },
         "required": ["filename"],
     }
+    timeout_seconds: int | None = None
 
     PAGE_CHARS = 15000
 

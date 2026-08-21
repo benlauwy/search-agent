@@ -24,6 +24,7 @@ class Tool(Protocol):
     name: str
     description: str
     parameters: dict  # JSON schema
+    timeout_seconds: int | None  # None = use the default tool timeout
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult: ...
 
