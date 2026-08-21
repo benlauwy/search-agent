@@ -4,17 +4,21 @@ An Open WebUI-style (concept only) chat application: a web UI for an agent that 
 proper tool-calling loop with a slim, purpose-built toolset. See [PLAN.md](PLAN.md) for
 the full design.
 
-## Current status (milestones 1–2)
+## Current status (milestones 1–5)
 
 - Streaming chat UI (React + Vite SPA) with session list, live reasoning display,
-  tool-call cards, file uploads, and downloadable artifacts
-- Agentic loop with guardrails (max steps, tool timeouts, result truncation, cancel)
+  tool-call cards, file uploads, and downloadable artifacts (with version history)
+- Agentic loop with guardrails (max steps, tool timeouts, result truncation, cancel,
+  per-user rate limits)
 - Tools: `web_search` (Exa), `write_file` (Markdown/text artifacts), `read_file`
-  (uploaded files, paginated)
+  (uploaded files, paginated), `trace_session`, `spawn_subagents`
+- All three providers (Fireworks, OpenAI Responses API, Anthropic) with correct
+  reasoning persistence across tool-calling turns
+- Session sharing: mark a session shared and any signed-in user can open its link
+  read-only (transcript, trace, and file downloads)
 - Pluggable auth: Google OIDC or a dev-login provider for local development
-- Fireworks provider with `reasoning_content` persistence across tool-calling turns
-  (OpenAI Responses API and Anthropic adapters land in milestone 3)
 - Provider/tool API keys and models configurable in the Settings UI (encrypted at rest)
+- Single-command deployment via Docker Compose (app + Postgres)
 
 ## Running locally
 
@@ -55,9 +59,30 @@ Environment variables (prefix `SA_`, or a `backend/.env` file):
 | `SA_ALLOWED_EMAIL_DOMAINS` | empty (allow all) | Comma-separated email-domain allowlist |
 | `SA_APP_URL` / `SA_API_URL` | localhost dev URLs | Frontend origin / backend base URL |
 | `SA_DATA_DIR` | `./data` | Where uploads and artifacts are stored |
+| `SA_RATE_LIMIT_RUNS_PER_MINUTE` | `10` | Per-user agent runs per minute (0 disables) |
+| `SA_RATE_LIMIT_UPLOADS_PER_MINUTE` | `30` | Per-user file uploads per minute (0 disables) |
+| `SA_STATIC_DIR` | empty | Serve a built frontend from this directory (used by Docker) |
 
 Provider API keys and model choices are managed in the Settings UI and stored in the
 database (secrets encrypted with a key derived from `SA_SECRET_KEY`).
+
+## Deployment (Docker Compose)
+
+```bash
+docker compose up --build
+# → http://localhost:8000 (frontend + API served by one container)
+```
+
+For a real deployment set at least `SA_SECRET_KEY` (`openssl rand -hex 32`),
+`SA_AUTH_PROVIDER=google` with the Google OAuth client vars, and
+`SA_APP_URL`/`SA_API_URL` to your public URL (they are the same origin here).
+Uploads/artifacts persist in the `app-data` volume, Postgres in `db-data`.
+
+**Run exactly one app process.** Run-slot reservation (duplicate-run
+prevention), file version allocation, per-user rate limits, and the SSE event
+bus are all in-process state; multiple uvicorn workers or app replicas would
+silently break them. Scale-out would need Postgres advisory locks and
+LISTEN/NOTIFY or Redis pub/sub first.
 
 ## Development
 

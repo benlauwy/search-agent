@@ -12,6 +12,8 @@ export interface Session {
   provider: string
   model: string
   kind: string
+  shared: boolean
+  owned: boolean
   created_at: string
   updated_at: string
 }
@@ -85,7 +87,7 @@ export const api = {
     }),
   deleteSession: (id: string) => request<{ ok: boolean }>(`/api/sessions/${id}`, { method: 'DELETE' }),
   getSession: (id: string) => request<Session>(`/api/sessions/${id}`),
-  updateSession: (id: string, values: { provider?: string; model?: string }) =>
+  updateSession: (id: string, values: { provider?: string; model?: string; shared?: boolean }) =>
     request<Session>(`/api/sessions/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },

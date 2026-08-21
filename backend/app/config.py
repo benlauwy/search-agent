@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     openai_reasoning_effort: str = "medium"
     anthropic_thinking_budget: int = 4096
 
+    # Rate limits (per user, per minute; 0 disables)
+    rate_limit_runs_per_minute: int = 10
+    rate_limit_uploads_per_minute: int = 30
+
+    # Static frontend build (Docker deployment); empty = API-only
+    static_dir: str = ""
+
     # Subagents
     max_subagents: int = 5
     subagent_concurrency: int = 3

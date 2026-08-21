@@ -11,13 +11,15 @@ from ..auth.routes import get_current_user
 from ..config import get_settings
 from ..db import get_db
 from ..models import ChatSession, File, User
+from ..ratelimit import enforce_rate_limit
+from ..sharing import is_shared
 from ..tools.files import (
     _safe_filename,
     artifact_storage_path,
     file_version_lock,
     next_file_version,
 )
-from .sessions import get_owned_session
+from .sessions import get_owned_session, get_readable_session
 
 router = APIRouter(prefix="/api", tags=["files"])
 
@@ -59,7 +61,7 @@ def _file_dict(f: File) -> dict:
 
 @router.get("/sessions/{session_id}/files")
 async def list_files(
-    session: ChatSession = Depends(get_owned_session),
+    session: ChatSession = Depends(get_readable_session),
     db: AsyncSession = Depends(get_db),
 ):
     rows = (
@@ -82,6 +84,7 @@ async def upload_file(
     db: AsyncSession = Depends(get_db),
 ):
     settings = get_settings()
+    enforce_rate_limit("uploads", user.id, settings.rate_limit_uploads_per_minute)
     filename = _safe_filename(file.filename or "upload.txt")
     if not _is_supported_text(filename, file.content_type):
         raise HTTPException(
@@ -140,6 +143,10 @@ async def download_file(
     db: AsyncSession = Depends(get_db),
 ):
     row = await db.get(File, file_id)
-    if row is None or row.user_id != user.id:
+    if row is None:
         raise HTTPException(404, "File not found")
+    if row.user_id != user.id:
+        session = await db.get(ChatSession, row.session_id)
+        if session is None or not await is_shared(db, session):
+            raise HTTPException(404, "File not found")
     return FileResponse(row.path, filename=row.filename, media_type=row.mime)
