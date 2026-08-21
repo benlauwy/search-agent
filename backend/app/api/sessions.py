@@ -104,7 +104,12 @@ async def update_session(
     if body.provider:
         if body.provider not in PROVIDERS:
             raise HTTPException(400, f"Unknown provider: {body.provider}")
-        session.provider = body.provider
+        if body.provider != session.provider:
+            session.provider = body.provider
+            # Model names are provider-specific; a stale override would fail
+            # on the new provider, so reset to the provider default.
+            if body.model is None:
+                session.model = ""
     if body.model is not None:
         session.model = body.model
     await db.commit()
