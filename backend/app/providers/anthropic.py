@@ -44,7 +44,10 @@ class AnthropicAdapter:
 
         for i, turn in enumerate(history):
             if turn.role == "user":
-                messages.append({"role": "user", "content": turn.text})
+                # Merge into a preceding tool-result user message (cancelled or
+                # max-step runs can leave tool results as the last turns); the
+                # API requires alternating roles.
+                append_user_blocks([{"type": "text", "text": turn.text}])
             elif turn.role == "assistant":
                 content: list[dict[str, Any]] = []
                 if i > last_user_idx:
