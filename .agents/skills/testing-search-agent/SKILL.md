@@ -20,8 +20,8 @@ description: How to run and end-to-end test the search-agent app (FastAPI + Reac
 - Events/state inspection: `docker exec search-agent-pg psql -U searchagent -d searchagent -c "select ... from events/sessions/messages/files"`. Table names: `sessions` (not chat_sessions), `messages`, `events`, `files`, `users`, `app_settings`.
 - Artifacts are stored under `backend/data/files/` — check disk to verify write_file / delete-cleanup behavior.
 
-## Milestone 3–4 features
-- Exa key field is Settings → Tools → "Exa API key (web search)" (secret `exa_key_debug`).
+## Milestone 3–4 features (requires PR #4 / the milestones 3–4 code)
+- Exa key field is Settings → Tools → "Exa API key (web search)" (app setting key `exa_api_key`; the key value comes from Devin secret `exa_key_debug`).
 - Subagent parallelism is best verified via `select type, created_at from events where type like 'subagent%'` in psql.
 - Subagent sessions are invisible in the sidebar by design — inspect them via the parent's Trace modal "Open subagent trace" button.
 
