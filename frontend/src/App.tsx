@@ -204,7 +204,7 @@ export default function App() {
     void loadSessions() // refresh titles
   }
 
-  const updateSession = async (values: { provider?: string; model?: string; shared?: boolean }) => {
+  const updateSession = async (values: { provider?: string; model?: string; shared?: boolean; capability?: string }) => {
     if (!activeId) return
     try {
       await api.updateSession(activeId, values)
@@ -307,6 +307,15 @@ export default function App() {
                       disabled={chat.running}
                       onCommit={(model) => void updateSession({ model })}
                     />
+                    <select
+                      value={active.capability}
+                      disabled={chat.running}
+                      title="Model capability (per-provider mapping in Settings)"
+                      onChange={(e) => void updateSession({ capability: e.target.value })}
+                    >
+                      <option value="smart">Smart</option>
+                      <option value="fast">Fast</option>
+                    </select>
                     <ShareButton
                       session={active}
                       onToggle={(shared) => updateSession({ shared })}

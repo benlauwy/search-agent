@@ -12,7 +12,7 @@ from ..db import get_db
 from ..models import ChatSession, Event, Message, User, _now
 from ..providers.registry import PROVIDERS
 from ..ratelimit import enforce_rate_limit
-from ..settings_store import get_setting
+from ..settings_store import CAPABILITIES, get_setting
 from ..sharing import is_shared
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -31,6 +31,7 @@ class UpdateSessionRequest(BaseModel):
     provider: str = ""
     model: str | None = None
     shared: bool | None = None
+    capability: str | None = None
 
 
 async def get_owned_session(
@@ -67,6 +68,7 @@ def _session_dict(s: ChatSession, user_id: str | None = None) -> dict:
         "model": s.model,
         "kind": s.kind,
         "shared": s.shared,
+        "capability": (s.settings_json or {}).get("capability", "smart"),
         "owned": user_id is None or s.user_id == user_id,
         "created_at": s.created_at.isoformat(),
         "updated_at": s.updated_at.isoformat(),
@@ -138,6 +140,11 @@ async def update_session(
         session.model = body.model
     if body.shared is not None:
         session.shared = body.shared
+    if body.capability is not None:
+        if body.capability not in CAPABILITIES:
+            raise HTTPException(400, f"Unknown capability: {body.capability}")
+        # Reassign so SQLAlchemy detects the JSON column change.
+        session.settings_json = {**(session.settings_json or {}), "capability": body.capability}
     await db.commit()
     await db.refresh(session)
     return _session_dict(session)

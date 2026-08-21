@@ -157,7 +157,11 @@ async def _run(
     try:
         async with SessionLocal() as db:
             session = await db.get(ChatSession, session_id)
-            adapter = await build_adapter(db, session.provider, session.model, subagent=subagent)
+            default_capability = "fast" if subagent else "smart"
+            capability = (session.settings_json or {}).get("capability", default_capability)
+            adapter = await build_adapter(
+                db, session.provider, session.model, capability=capability
+            )
             tools = build_tools(subagent=subagent)
             schemas = tool_schemas(tools)
 
@@ -168,7 +172,10 @@ async def _run(
             ).scalars().all()
             history = _reconcile_history([turn_from_message_row(r) for r in rows])
 
-        await emit("run_started", {"provider": adapter.name, "model": adapter.model})
+        await emit(
+            "run_started",
+            {"provider": adapter.name, "model": adapter.model, "capability": capability},
+        )
 
         system_prompt = SUBAGENT_SYSTEM_PROMPT if subagent else SYSTEM_PROMPT
         max_steps = settings.max_steps_per_subagent_run if subagent else settings.max_steps_per_run

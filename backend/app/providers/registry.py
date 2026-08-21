@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..settings_store import get_setting
+from ..settings_store import CAPABILITIES, get_setting
 from .anthropic import AnthropicAdapter
 from .base import ProviderAdapter
 from .fireworks import FireworksAdapter
@@ -10,12 +10,13 @@ PROVIDERS = ("fireworks", "openai", "anthropic")
 
 
 async def build_adapter(
-    db: AsyncSession, provider: str, model: str = "", subagent: bool = False
+    db: AsyncSession, provider: str, model: str = "", capability: str = "smart"
 ) -> ProviderAdapter:
     if provider not in PROVIDERS:
         raise ValueError(f"Unknown provider: {provider}")
-    model_key = f"{provider}_subagent_model" if subagent else f"{provider}_model"
-    resolved_model = model or await get_setting(db, model_key)
+    if capability not in CAPABILITIES:
+        raise ValueError(f"Unknown capability: {capability}")
+    resolved_model = model or await get_setting(db, f"{provider}_{capability}_model")
     api_key = await get_setting(db, f"{provider}_api_key")
     if not api_key:
         raise RuntimeError(
