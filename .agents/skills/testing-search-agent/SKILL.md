@@ -25,6 +25,9 @@ description: How to run and end-to-end test the search-agent app (FastAPI + Reac
 - Subagent parallelism is best verified via `select type, created_at from events where type like 'subagent%'` in psql.
 - Subagent sessions are invisible in the sidebar by design — inspect them via the parent's Trace modal "Open subagent trace" button.
 
+## Backend settings via environment
+- Pydantic settings use `env_prefix="SA_"` (backend/app/config.py). To override a setting via env you MUST prefix it: e.g. `SA_SUBAGENT_TIMEOUT_SECONDS=20 uv run uvicorn app.main:app --port 8000`. An unprefixed var (e.g. `SUBAGENT_TIMEOUT_SECONDS`) is silently ignored and the default applies — verify the override took effect (e.g. check `/proc/<pid>/environ` and observe the behavior) before trusting a test run.
+
 ## Pitfalls
 - If you restart the backend while the frontend page is open, the EventSource (SSE) dies permanently (browser EventSource stops retrying after a failed reconnect) — the UI gets stuck "running" and misses run events. Reload the page (F5) after any backend restart before judging streaming/cancel behavior.
 - Cancel semantics: POST /api/sessions/{id}/cancel returns 200 and the runner emits `run_finished {"cancelled": true}`; the UI only reflects it via the SSE stream.
