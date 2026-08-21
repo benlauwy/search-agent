@@ -20,6 +20,11 @@ description: How to run and end-to-end test the search-agent app (FastAPI + Reac
 - Events/state inspection: `docker exec search-agent-pg psql -U searchagent -d searchagent -c "select ... from events/sessions/messages/files"`. Table names: `sessions` (not chat_sessions), `messages`, `events`, `files`, `users`, `app_settings`.
 - Artifacts are stored under `backend/data/files/` — check disk to verify write_file / delete-cleanup behavior.
 
+## Milestone 3–4 features
+- Exa key field is Settings → Tools → "Exa API key (web search)" (secret `exa_key_debug`).
+- Subagent parallelism is best verified via `select type, created_at from events where type like 'subagent%'` in psql.
+- Subagent sessions are invisible in the sidebar by design — inspect them via the parent's Trace modal "Open subagent trace" button.
+
 ## Pitfalls
 - If you restart the backend while the frontend page is open, the EventSource (SSE) dies permanently (browser EventSource stops retrying after a failed reconnect) — the UI gets stuck "running" and misses run events. Reload the page (F5) after any backend restart before judging streaming/cancel behavior.
 - Cancel semantics: POST /api/sessions/{id}/cancel returns 200 and the runner emits `run_finished {"cancelled": true}`; the UI only reflects it via the SSE stream.
