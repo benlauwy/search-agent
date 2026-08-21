@@ -32,6 +32,13 @@ description: How to run and end-to-end test the search-agent app (FastAPI + Reac
 - Cancel UX: the "Stopping…" label is transient and usually resolves in <1s locally — hard to capture on screen; the durable evidence is the "Run cancelled." notice and the composer returning to Send.
 - Docker: `docker compose up --build -d` serves frontend+API on :8000 (SA_STATIC_DIR points at the built frontend inside the image). Stop the local uvicorn AND vite first (port clash on 8000; stray vite keeps 5173). The compose stack uses its own db volume — settings/API keys from local testing are absent there.
 
+## Model capability (smart/fast) features
+- Model settings keys are `<provider>_smart_model` / `<provider>_fast_model` (defaults in `backend/app/settings_store.py DEFAULT_MODELS`); Settings UI shows "Smart model"/"Fast model" per provider.
+- Session capability lives in `sessions.settings_json ->> 'capability'` (chat default "smart", subagent default "fast"); the header Smart/Fast `<select>` is owned-sessions-only and disabled while a run is active.
+- Verify effective model per run via `select payload_json->>'model', payload_json->>'capability' from events where type='run_started'` (column is `payload_json`, not `payload`).
+- Mixed subagent tiers: an explicit prompt like "one FAST subagent (capability 'fast') to X and one SMART subagent (capability 'smart') to Y, use spawn_subagents with those capabilities" reliably makes the parent pass per-task capability; verify via child sessions' settings_json + their run_started events.
+- Mid-run PATCH guard: `{shared}` toggles are allowed during a run (200), `{provider|model|capability}` return 409.
+
 ## Backend settings via environment
 - Pydantic settings use `env_prefix="SA_"` (backend/app/config.py). To override a setting via env you MUST prefix it: e.g. `SA_SUBAGENT_TIMEOUT_SECONDS=20 uv run uvicorn app.main:app --port 8000`. An unprefixed var (e.g. `SUBAGENT_TIMEOUT_SECONDS`) is silently ignored and the default applies — verify the override took effect (e.g. check `/proc/<pid>/environ` and observe the behavior) before trusting a test run.
 
