@@ -24,6 +24,8 @@ export function useChat(sessionId: string | null) {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [toolActivity, setToolActivity] = useState<ToolActivity[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [cancelling, setCancelling] = useState(false)
   const esRef = useRef<EventSource | null>(null)
 
   const refresh = useCallback(async () => {
@@ -39,6 +41,8 @@ export function useChat(sessionId: string | null) {
     setDraft(null)
     setToolActivity([])
     setError(null)
+    setNotice(null)
+    setCancelling(false)
     setRunning(false)
     if (!sessionId) return
     void refresh()
@@ -49,10 +53,13 @@ export function useChat(sessionId: string | null) {
     es.addEventListener('status', (e) => {
       const data = JSON.parse((e as MessageEvent).data)
       setRunning(Boolean(data.running))
+      if (!data.running) setCancelling(false)
     })
     es.addEventListener('run_started', () => {
       setRunning(true)
+      setCancelling(false)
       setError(null)
+      setNotice(null)
       setToolActivity([])
     })
     es.addEventListener('reasoning_delta', (e) => {
@@ -120,8 +127,11 @@ export function useChat(sessionId: string | null) {
         if (payload?.message) setError(payload.message)
       }
     })
-    es.addEventListener('run_finished', () => {
+    es.addEventListener('run_finished', (e) => {
+      const { payload } = JSON.parse((e as MessageEvent).data)
+      if (payload?.cancelled) setNotice('Run cancelled.')
       setRunning(false)
+      setCancelling(false)
       setDraft(null)
       void refresh()
     })
@@ -136,6 +146,7 @@ export function useChat(sessionId: string | null) {
     async (text: string) => {
       if (!sessionId) return
       setError(null)
+      setNotice(null)
       const pendingId = localId()
       setMessages((msgs) => [
         ...msgs,
@@ -164,7 +175,13 @@ export function useChat(sessionId: string | null) {
   )
 
   const cancel = useCallback(async () => {
-    if (sessionId) await api.cancelRun(sessionId)
+    if (!sessionId) return
+    setCancelling(true)
+    try {
+      await api.cancelRun(sessionId)
+    } catch {
+      setCancelling(false)
+    }
   }, [sessionId])
 
   const upload = useCallback(
@@ -176,5 +193,18 @@ export function useChat(sessionId: string | null) {
     [sessionId],
   )
 
-  return { messages, files, running, draft, toolActivity, error, send, cancel, upload, refresh }
+  return {
+    messages,
+    files,
+    running,
+    draft,
+    toolActivity,
+    error,
+    notice,
+    cancelling,
+    send,
+    cancel,
+    upload,
+    refresh,
+  }
 }

@@ -20,27 +20,38 @@ SECRET_KEYS = {
     "exa_api_key",
 }
 
-PLAIN_KEYS = {
-    "fireworks_model",
-    "fireworks_subagent_model",
-    "openai_model",
-    "openai_subagent_model",
-    "anthropic_model",
-    "anthropic_subagent_model",
-    "default_provider",
+# Two capability levels; each provider maps a capability to a default model.
+# The Settings UI can override any entry via the "<provider>_<capability>_model" keys.
+CAPABILITIES = ("smart", "fast")
+
+DEFAULT_MODELS: dict[str, dict[str, str]] = {
+    "fireworks": {
+        "smart": "accounts/fireworks/models/deepseek-v4-pro",
+        "fast": "accounts/fireworks/models/deepseek-v4-flash-0731",
+    },
+    "openai": {
+        "smart": "gpt-5",
+        "fast": "gpt-5-mini",
+    },
+    "anthropic": {
+        "smart": "claude-sonnet-4-5",
+        "fast": "claude-haiku-4-5",
+    },
 }
+
+PLAIN_KEYS = {
+    f"{provider}_{capability}_model"
+    for provider in DEFAULT_MODELS
+    for capability in CAPABILITIES
+} | {"default_provider"}
 
 ALL_KEYS = SECRET_KEYS | PLAIN_KEYS
 
 DEFAULTS = {
-    "fireworks_model": "accounts/fireworks/models/deepseek-v4-pro",
-    "fireworks_subagent_model": "accounts/fireworks/models/deepseek-v4-flash-0731",
-    "openai_model": "gpt-5",
-    "openai_subagent_model": "gpt-5-mini",
-    "anthropic_model": "claude-sonnet-4-5",
-    "anthropic_subagent_model": "claude-haiku-4-5",
-    "default_provider": "fireworks",
-}
+    f"{provider}_{capability}_model": model
+    for provider, by_capability in DEFAULT_MODELS.items()
+    for capability, model in by_capability.items()
+} | {"default_provider": "fireworks"}
 
 
 def _fernet() -> Fernet:

@@ -54,14 +54,57 @@ function ModelInput({
   )
 }
 
+function ShareButton({
+  session,
+  onToggle,
+}: {
+  session: Session
+  onToggle: (shared: boolean) => Promise<void>
+}) {
+  const [copied, setCopied] = useState(false)
+  const link = `${window.location.origin}/#/sessions/${session.id}`
+  const copy = () => {
+    void navigator.clipboard.writeText(link).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+  return (
+    <span className="share-controls">
+      <button
+        className={session.shared ? 'shared' : ''}
+        title={
+          session.shared
+            ? 'Shared: anyone signed in with the link can view. Click to unshare.'
+            : 'Share: let anyone signed in view this session via its link.'
+        }
+        onClick={() => {
+          void onToggle(!session.shared).then(() => {
+            if (!session.shared) copy()
+          })
+        }}
+      >
+        {session.shared ? 'Shared ✓' : 'Share'}
+      </button>
+      {session.shared && (
+        <button title={link} onClick={copy}>
+          {copied ? 'Copied!' : 'Copy link'}
+        </button>
+      )}
+    </span>
+  )
+}
+
 function Composer({
   onSend,
   onCancel,
   running,
+  cancelling,
 }: {
   onSend: (text: string) => void
   onCancel: () => void
   running: boolean
+  cancelling: boolean
 }) {
   const [text, setText] = useState('')
   const submit = () => {
@@ -85,8 +128,8 @@ function Composer({
         }}
       />
       {running ? (
-        <button className="danger" onClick={onCancel}>
-          Stop
+        <button className="danger" onClick={onCancel} disabled={cancelling}>
+          {cancelling ? 'Stopping…' : 'Stop'}
         </button>
       ) : (
         <button className="primary" onClick={submit} disabled={!text.trim()}>
@@ -104,6 +147,7 @@ export default function App() {
   const [activeId, setActiveId] = useState<string | null>(() => sessionIdFromHash())
   const [showSettings, setShowSettings] = useState(false)
   const [showTrace, setShowTrace] = useState(false)
+  const [externalSession, setExternalSession] = useState<Session | null>(null)
   const chat = useChat(activeId)
 
   useEffect(() => {
@@ -160,20 +204,40 @@ export default function App() {
     void loadSessions() // refresh titles
   }
 
-  const updateSession = async (values: { provider?: string; model?: string }) => {
+  const updateSession = async (values: { provider?: string; model?: string; shared?: boolean; capability?: string }) => {
     if (!activeId) return
     try {
       await api.updateSession(activeId, values)
-      await loadSessions()
     } catch (e) {
       alert(`Failed to update session: ${e instanceof Error ? e.message : e}`)
+      throw e
     }
+    await loadSessions()
   }
+
+  // A session link may point at someone else's shared session (or a subagent
+  // session), which won't be in the sidebar list — fetch it directly.
+  useEffect(() => {
+    setExternalSession(null)
+    if (!activeId || !user || sessions.some((s) => s.id === activeId)) return
+    let stale = false
+    api
+      .getSession(activeId)
+      .then((s) => {
+        if (!stale) setExternalSession(s)
+      })
+      .catch(() => {
+        if (!stale) setExternalSession(null)
+      })
+    return () => {
+      stale = true
+    }
+  }, [activeId, user, sessions])
 
   if (!authChecked) return null
   if (!user) return <LoginScreen />
 
-  const active = sessions.find((s) => s.id === activeId) ?? null
+  const active = sessions.find((s) => s.id === activeId) ?? externalSession
 
   return (
     <div className="app">
@@ -224,23 +288,44 @@ export default function App() {
             <header className="chat-header">
               <span className="chat-title">{active.title}</span>
               <span className="chat-controls">
-                <select
-                  value={active.provider}
-                  disabled={chat.running}
-                  title="Provider (switchable between runs)"
-                  onChange={(e) => void updateSession({ provider: e.target.value })}
-                >
-                  {PROVIDERS.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-                <ModelInput
-                  value={active.model}
-                  disabled={chat.running}
-                  onCommit={(model) => void updateSession({ model })}
-                />
+                {active.owned ? (
+                  <>
+                    <select
+                      value={active.provider}
+                      disabled={chat.running}
+                      title="Provider (switchable between runs)"
+                      onChange={(e) => void updateSession({ provider: e.target.value })}
+                    >
+                      {PROVIDERS.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                    <ModelInput
+                      value={active.model}
+                      disabled={chat.running}
+                      onCommit={(model) => void updateSession({ model })}
+                    />
+                    <select
+                      value={active.capability}
+                      disabled={chat.running}
+                      title="Model capability (per-provider mapping in Settings)"
+                      onChange={(e) => void updateSession({ capability: e.target.value })}
+                    >
+                      <option value="smart">Smart</option>
+                      <option value="fast">Fast</option>
+                    </select>
+                    <ShareButton
+                      session={active}
+                      onToggle={(shared) => updateSession({ shared })}
+                    />
+                  </>
+                ) : (
+                  <span className="readonly-badge" title="You are viewing someone else's shared session">
+                    Shared with you · read-only
+                  </span>
+                )}
                 <button onClick={() => setShowTrace(true)}>Trace</button>
               </span>
             </header>
@@ -249,8 +334,16 @@ export default function App() {
               draft={chat.draft}
               running={chat.running}
               error={chat.error}
+              notice={chat.notice}
             />
-            <Composer onSend={(t) => void send(t)} onCancel={() => void chat.cancel()} running={chat.running} />
+            {active.owned && (
+              <Composer
+                onSend={(t) => void send(t)}
+                onCancel={() => void chat.cancel()}
+                running={chat.running}
+                cancelling={chat.cancelling}
+              />
+            )}
           </>
         ) : (
           <div className="empty-state center">
@@ -262,7 +355,7 @@ export default function App() {
         )}
       </main>
 
-      {active && <FilesPanel files={chat.files} onUpload={chat.upload} />}
+      {active && <FilesPanel files={chat.files} onUpload={chat.upload} readOnly={!active.owned} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       {showTrace && activeId && (
         <TraceView key={activeId} sessionId={activeId} onClose={() => setShowTrace(false)} />

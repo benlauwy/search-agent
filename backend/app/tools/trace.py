@@ -11,6 +11,7 @@ import re
 from sqlalchemy import select
 
 from ..models import ChatSession, File, Message
+from ..sharing import is_shared
 from .base import ToolContext, ToolResult
 
 SESSION_ID_RE = re.compile(r"[0-9a-f]{32}")
@@ -124,7 +125,9 @@ class TraceSessionTool:
                 is_error=True,
             )
         session = await ctx.db.get(ChatSession, session_id)
-        if session is None or (session.user_id != ctx.user_id and not session.shared):
+        if session is None or (
+            session.user_id != ctx.user_id and not await is_shared(ctx.db, session)
+        ):
             return ToolResult(
                 f"Session '{session_id}' not found or not accessible.", is_error=True
             )

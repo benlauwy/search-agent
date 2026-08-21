@@ -75,8 +75,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               <fieldset key={provider}>
                 <legend>{label}</legend>
                 {field(`${provider}_api_key`, 'API key', true)}
-                {field(`${provider}_model`, 'Model (main loop)')}
-                {field(`${provider}_subagent_model`, 'Model (subagents)')}
+                {field(`${provider}_smart_model`, 'Smart model')}
+                {field(`${provider}_fast_model`, 'Fast model')}
               </fieldset>
             ))}
             <fieldset>
