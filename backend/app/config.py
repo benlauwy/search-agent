@@ -26,6 +26,16 @@ class Settings(BaseSettings):
     tool_timeout_seconds: int = 60
     tool_result_max_chars: int = 20000
 
+    # Providers
+    openai_reasoning_effort: str = "medium"
+    anthropic_thinking_budget: int = 4096
+
+    # Subagents
+    max_subagents: int = 5
+    subagent_concurrency: int = 3
+    max_steps_per_subagent_run: int = 15
+    subagent_timeout_seconds: int = 900
+
 
 @lru_cache
 def get_settings() -> Settings:

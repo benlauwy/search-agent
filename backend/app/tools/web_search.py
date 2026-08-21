@@ -23,6 +23,7 @@ class WebSearchTool:
         },
         "required": ["query"],
     }
+    timeout_seconds: int | None = None
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         api_key = await get_setting(ctx.db, "exa_api_key")

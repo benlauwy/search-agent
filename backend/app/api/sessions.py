@@ -24,6 +24,11 @@ class SendMessageRequest(BaseModel):
     text: str
 
 
+class UpdateSessionRequest(BaseModel):
+    provider: str = ""
+    model: str | None = None
+
+
 async def get_owned_session(
     session_id: str,
     user: User = Depends(get_current_user),
@@ -86,27 +91,68 @@ async def get_session(session: ChatSession = Depends(get_owned_session)):
     return _session_dict(session)
 
 
+@router.patch("/{session_id}")
+async def update_session(
+    body: UpdateSessionRequest,
+    session: ChatSession = Depends(get_owned_session),
+    db: AsyncSession = Depends(get_db),
+):
+    """Change provider/model for a session. Providers may only switch between
+    runs — mid-tool-loop switches would break reasoning continuity."""
+    if runner.is_running(session.id):
+        raise HTTPException(409, "Cannot change provider while a run is in progress")
+    if body.provider:
+        if body.provider not in PROVIDERS:
+            raise HTTPException(400, f"Unknown provider: {body.provider}")
+        if body.provider != session.provider:
+            session.provider = body.provider
+            # Model names are provider-specific; a stale override would fail
+            # on the new provider, so reset to the provider default.
+            if body.model is None:
+                session.model = ""
+    if body.model is not None:
+        session.model = body.model
+    await db.commit()
+    await db.refresh(session)
+    return _session_dict(session)
+
+
 @router.delete("/{session_id}")
 async def delete_session(
     session: ChatSession = Depends(get_owned_session),
     db: AsyncSession = Depends(get_db),
 ):
-    await runner.stop_run(session.id)
     from ..models import File
 
     file_paths: list[str] = []
-    for model in (Message, Event, File):
-        rows = (
-            (await db.execute(select(model).where(model.session_id == session.id)))
+
+    async def delete_one(target: ChatSession) -> None:
+        await runner.stop_run(target.id)
+        children = (
+            (
+                await db.execute(
+                    select(ChatSession).where(ChatSession.parent_session_id == target.id)
+                )
+            )
             .scalars()
             .all()
         )
-        for r in rows:
-            if model is File and r.path:
-                file_paths.append(r.path)
-            await db.delete(r)
-    await db.flush()
-    await db.delete(session)
+        for child in children:
+            await delete_one(child)
+        for model in (Message, Event, File):
+            rows = (
+                (await db.execute(select(model).where(model.session_id == target.id)))
+                .scalars()
+                .all()
+            )
+            for r in rows:
+                if model is File and r.path:
+                    file_paths.append(r.path)
+                await db.delete(r)
+        await db.flush()
+        await db.delete(target)
+
+    await delete_one(session)
     await db.commit()
     for path in file_paths:
         try:

@@ -4,6 +4,14 @@ import { useChat } from './useChat'
 import { MessageList } from './components/MessageList'
 import { FilesPanel } from './components/FilesPanel'
 import { SettingsModal } from './components/SettingsModal'
+import { TraceView } from './components/TraceView'
+
+const PROVIDERS = ['fireworks', 'openai', 'anthropic']
+
+function sessionIdFromHash(): string | null {
+  const match = window.location.hash.match(/^#\/sessions\/([0-9a-f]{32})$/)
+  return match ? match[1] : null
+}
 
 function LoginScreen() {
   return (
@@ -14,6 +22,35 @@ function LoginScreen() {
         Sign in
       </a>
     </div>
+  )
+}
+
+function ModelInput({
+  value,
+  disabled,
+  onCommit,
+}: {
+  value: string
+  disabled: boolean
+  onCommit: (model: string) => void
+}) {
+  const [draft, setDraft] = useState(value)
+  useEffect(() => setDraft(value), [value])
+  return (
+    <input
+      className="model-input"
+      placeholder="default model"
+      value={draft}
+      disabled={disabled}
+      title="Model override (blank = default from Settings)"
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        if (draft !== value) onCommit(draft)
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+      }}
+    />
   )
 }
 
@@ -64,8 +101,9 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null)
   const [authChecked, setAuthChecked] = useState(false)
   const [sessions, setSessions] = useState<Session[]>([])
-  const [activeId, setActiveId] = useState<string | null>(null)
+  const [activeId, setActiveId] = useState<string | null>(() => sessionIdFromHash())
   const [showSettings, setShowSettings] = useState(false)
+  const [showTrace, setShowTrace] = useState(false)
   const chat = useChat(activeId)
 
   useEffect(() => {
@@ -85,6 +123,20 @@ export default function App() {
   useEffect(() => {
     if (user) void loadSessions()
   }, [user, loadSessions])
+
+  // Keep the URL hash and active session in sync (shareable session links).
+  useEffect(() => {
+    const onHashChange = () => setActiveId(sessionIdFromHash())
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
+
+  useEffect(() => {
+    const target = activeId ? `#/sessions/${activeId}` : ''
+    if (window.location.hash !== target) {
+      window.history.replaceState(null, '', target || window.location.pathname)
+    }
+  }, [activeId])
 
   const newSession = async () => {
     const s = await api.createSession()
@@ -106,6 +158,16 @@ export default function App() {
   const send = async (text: string) => {
     await chat.send(text)
     void loadSessions() // refresh titles
+  }
+
+  const updateSession = async (values: { provider?: string; model?: string }) => {
+    if (!activeId) return
+    try {
+      await api.updateSession(activeId, values)
+      await loadSessions()
+    } catch (e) {
+      alert(`Failed to update session: ${e instanceof Error ? e.message : e}`)
+    }
   }
 
   if (!authChecked) return null
@@ -161,9 +223,25 @@ export default function App() {
           <>
             <header className="chat-header">
               <span className="chat-title">{active.title}</span>
-              <span className="chat-provider">
-                {active.provider}
-                {active.model ? ` · ${active.model}` : ''}
+              <span className="chat-controls">
+                <select
+                  value={active.provider}
+                  disabled={chat.running}
+                  title="Provider (switchable between runs)"
+                  onChange={(e) => void updateSession({ provider: e.target.value })}
+                >
+                  {PROVIDERS.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+                <ModelInput
+                  value={active.model}
+                  disabled={chat.running}
+                  onCommit={(model) => void updateSession({ model })}
+                />
+                <button onClick={() => setShowTrace(true)}>Trace</button>
               </span>
             </header>
             <MessageList
@@ -186,6 +264,9 @@ export default function App() {
 
       {active && <FilesPanel files={chat.files} onUpload={chat.upload} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showTrace && activeId && (
+        <TraceView key={activeId} sessionId={activeId} onClose={() => setShowTrace(false)} />
+      )}
     </div>
   )
 }

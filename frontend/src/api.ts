@@ -44,6 +44,15 @@ export interface FileInfo {
   created_at: string
 }
 
+export interface EventInfo {
+  id: string
+  run_id: string
+  idx: number
+  type: string
+  payload: Record<string, unknown>
+  created_at: string
+}
+
 export interface AppSettings {
   values: Record<string, string>
   secret_keys: string[]
@@ -75,6 +84,14 @@ export const api = {
       body: JSON.stringify({ provider, model }),
     }),
   deleteSession: (id: string) => request<{ ok: boolean }>(`/api/sessions/${id}`, { method: 'DELETE' }),
+  getSession: (id: string) => request<Session>(`/api/sessions/${id}`),
+  updateSession: (id: string, values: { provider?: string; model?: string }) =>
+    request<Session>(`/api/sessions/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(values),
+    }),
+  listEvents: (id: string) => request<EventInfo[]>(`/api/sessions/${id}/events`),
   listMessages: (id: string) => request<Message[]>(`/api/sessions/${id}/messages`),
   sendMessage: (id: string, text: string) =>
     request<{ run_id: string }>(`/api/sessions/${id}/messages`, {

@@ -1,8 +1,10 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..settings_store import get_setting
+from .anthropic import AnthropicAdapter
 from .base import ProviderAdapter
 from .fireworks import FireworksAdapter
+from .openai import OpenAIAdapter
 
 PROVIDERS = ("fireworks", "openai", "anthropic")
 
@@ -21,5 +23,6 @@ async def build_adapter(
         )
     if provider == "fireworks":
         return FireworksAdapter(api_key=api_key, model=resolved_model)
-    # OpenAI (Responses API) and Anthropic adapters land in milestone 3.
-    raise RuntimeError(f"Provider '{provider}' is not implemented yet.")
+    if provider == "openai":
+        return OpenAIAdapter(api_key=api_key, model=resolved_model)
+    return AnthropicAdapter(api_key=api_key, model=resolved_model)
