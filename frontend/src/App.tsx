@@ -208,10 +208,11 @@ export default function App() {
     if (!activeId) return
     try {
       await api.updateSession(activeId, values)
-      await loadSessions()
     } catch (e) {
       alert(`Failed to update session: ${e instanceof Error ? e.message : e}`)
+      throw e
     }
+    await loadSessions()
   }
 
   // A session link may point at someone else's shared session (or a subagent

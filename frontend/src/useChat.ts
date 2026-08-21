@@ -53,9 +53,11 @@ export function useChat(sessionId: string | null) {
     es.addEventListener('status', (e) => {
       const data = JSON.parse((e as MessageEvent).data)
       setRunning(Boolean(data.running))
+      if (!data.running) setCancelling(false)
     })
     es.addEventListener('run_started', () => {
       setRunning(true)
+      setCancelling(false)
       setError(null)
       setNotice(null)
       setToolActivity([])
