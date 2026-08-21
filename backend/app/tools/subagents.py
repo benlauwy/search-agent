@@ -8,12 +8,17 @@ and per-child step budgets are bounded.
 """
 
 import asyncio
+import math
 
 from ..config import get_settings
 from ..models import ChatSession, Message
 from .base import ToolContext, ToolResult
 
 MAX_ANSWER_CHARS = 4000
+
+
+class _SubagentTimeout(Exception):
+    pass
 
 
 class SpawnSubagentsTool:
@@ -46,7 +51,12 @@ class SpawnSubagentsTool:
     }
 
     def __init__(self):
-        self.timeout_seconds: int | None = get_settings().subagent_timeout_seconds
+        # subagent_timeout_seconds bounds each child individually (see run_one).
+        # The outer tool timeout only guards the worst case: all task batches
+        # running back-to-back at the configured concurrency, plus slack.
+        s = get_settings()
+        batches = math.ceil(s.max_subagents / s.subagent_concurrency)
+        self.timeout_seconds: int | None = batches * s.subagent_timeout_seconds + 60
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         from ..agent import runner  # deferred: runner imports the tool registry
@@ -88,11 +98,27 @@ class SpawnSubagentsTool:
                 await ctx.emit(
                     "subagent_started", {"session_id": child_id, "task": task_text}
                 )
-                answer = await runner.run_subagent(child_id, ctx.user_id)
+                timed_out = False
+                try:
+                    answer = await asyncio.wait_for(
+                        runner.run_subagent(child_id, ctx.user_id),
+                        timeout=settings.subagent_timeout_seconds,
+                    )
+                except TimeoutError:
+                    answer = None
+                    timed_out = True
                 await ctx.emit(
                     "subagent_finished",
-                    {"session_id": child_id, "ok": answer is not None},
+                    {
+                        "session_id": child_id,
+                        "ok": answer is not None,
+                        "timed_out": timed_out,
+                    },
                 )
+                if timed_out:
+                    raise _SubagentTimeout(
+                        f"timed out after {settings.subagent_timeout_seconds}s"
+                    )
                 return answer
 
         gathered = await asyncio.gather(
