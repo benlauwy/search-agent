@@ -1,7 +1,9 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .api import files, sessions, settings, stream
 from .auth import routes as auth_routes
@@ -38,3 +40,10 @@ app.include_router(settings.router)
 @app.get("/api/health")
 async def health():
     return {"ok": True}
+
+
+# In the Docker deployment the frontend build is served by this process
+# (hash-based routing, so index.html at / covers all client routes).
+_static_dir = get_settings().static_dir
+if _static_dir and os.path.isdir(_static_dir):
+    app.mount("/", StaticFiles(directory=_static_dir, html=True), name="static")

@@ -1,0 +1,42 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      SA_DATABASE_URL: postgresql+asyncpg://searchagent:searchagent@db:5432/searchagent
+      # The app serves the frontend itself, so app_url == api_url (same origin).
+      SA_APP_URL: ${SA_APP_URL:-http://localhost:8000}
+      SA_API_URL: ${SA_API_URL:-http://localhost:8000}
+      # Required when SA_AUTH_PROVIDER != dev; generate with: openssl rand -hex 32
+      SA_SECRET_KEY: ${SA_SECRET_KEY:-dev-secret-change-me}
+      SA_AUTH_PROVIDER: ${SA_AUTH_PROVIDER:-dev}
+      SA_GOOGLE_CLIENT_ID: ${SA_GOOGLE_CLIENT_ID:-}
+      SA_GOOGLE_CLIENT_SECRET: ${SA_GOOGLE_CLIENT_SECRET:-}
+      SA_ALLOWED_EMAIL_DOMAINS: ${SA_ALLOWED_EMAIL_DOMAINS:-}
+    volumes:
+      - app-data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    # pgvector image so the future corpus_search milestone needs no migration.
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: searchagent
+      POSTGRES_PASSWORD: searchagent
+      POSTGRES_DB: searchagent
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U searchagent -d searchagent"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  app-data:
+  db-data:

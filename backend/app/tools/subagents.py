@@ -2,9 +2,10 @@
 
 Each child is a real session (kind="subagent", hidden from the session list)
 with its own messages and events, so it is inspectable via trace_session and
-the trace UI. Children run with the parent's provider, the configured subagent
-model, and a restricted toolset (no spawn_subagents — depth 1). Concurrency
-and per-child step budgets are bounded.
+the trace UI. Children run with the parent's provider at a per-task capability
+the parent model chooses ("smart" or "fast", default fast), and a restricted
+toolset (no spawn_subagents — depth 1). Concurrency and per-child step budgets
+are bounded.
 """
 
 import asyncio
@@ -12,6 +13,7 @@ import math
 
 from ..config import get_settings
 from ..models import ChatSession, Message
+from ..settings_store import CAPABILITIES
 from .base import ToolContext, ToolResult
 
 MAX_ANSWER_CHARS = 4000
@@ -26,7 +28,10 @@ class SpawnSubagentsTool:
     description = (
         "Run several sub-tasks in parallel, each handled by an independent "
         "subagent with web search and file tools. Use for research that splits "
-        "into independent parts. Returns each subagent's final answer."
+        "into independent parts. Per task, choose the subagent's capability: "
+        "'fast' (cheaper, default) for simple lookups, 'smart' (same tier as "
+        "you) for sub-tasks needing deeper reasoning or synthesis. Returns "
+        "each subagent's final answer."
     )
     parameters = {
         "type": "object",
@@ -41,6 +46,11 @@ class SpawnSubagentsTool:
                         "context": {
                             "type": "string",
                             "description": "Optional extra context for the subagent",
+                        },
+                        "capability": {
+                            "type": "string",
+                            "enum": ["smart", "fast"],
+                            "description": "Model tier for this subagent (default 'fast')",
                         },
                     },
                     "required": ["task"],
@@ -77,6 +87,12 @@ class SpawnSubagentsTool:
             if not task_text:
                 return ToolResult("Every task needs a non-empty 'task' string.", is_error=True)
             context = str(t.get("context", "")).strip()
+            capability = t.get("capability") or "fast"
+            if capability not in CAPABILITIES:
+                return ToolResult(
+                    f"Invalid capability {capability!r} (use one of {list(CAPABILITIES)}).",
+                    is_error=True,
+                )
             prompt = task_text if not context else f"{task_text}\n\nContext:\n{context}"
             child = ChatSession(
                 user_id=ctx.user_id,
@@ -84,6 +100,7 @@ class SpawnSubagentsTool:
                 provider=parent.provider,
                 kind="subagent",
                 parent_session_id=parent.id,
+                settings_json={"capability": capability},
             )
             ctx.db.add(child)
             await ctx.db.flush()
@@ -97,7 +114,7 @@ class SpawnSubagentsTool:
             async with sem:
                 await ctx.emit(
                     "subagent_started", {"session_id": child_id, "task": task_text}
-                )
+                )  # capability is in the child's run_started event
                 timed_out = False
                 try:
                     answer = await asyncio.wait_for(

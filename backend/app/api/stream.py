@@ -9,6 +9,7 @@ from ..agent.bus import bus
 from ..auth.routes import get_current_user
 from ..db import SessionLocal
 from ..models import ChatSession
+from ..sharing import is_shared
 
 router = APIRouter(prefix="/api/sessions", tags=["stream"])
 
@@ -20,7 +21,7 @@ async def stream(session_id: str, request: Request):
     async with SessionLocal() as db:
         user = await get_current_user(request, db)
         session = await db.get(ChatSession, session_id)
-        if session is None or session.user_id != user.id:
+        if session is None or (session.user_id != user.id and not await is_shared(db, session)):
             raise HTTPException(404, "Session not found")
 
     async def generator():

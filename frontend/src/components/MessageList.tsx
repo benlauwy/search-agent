@@ -64,16 +64,18 @@ export function MessageList({
   draft,
   running,
   error,
+  notice,
 }: {
   messages: Message[]
   draft: Draft | null
   running: boolean
   error: string | null
+  notice?: string | null
 }) {
   const bottomRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages.length, draft?.text, draft?.reasoning, error])
+  }, [messages.length, draft?.text, draft?.reasoning, error, notice])
 
   return (
     <div className="message-list">
@@ -103,6 +105,7 @@ export function MessageList({
       )}
       {running && !draft && <div className="msg msg-assistant msg-draft">…</div>}
       {error && <div className="msg msg-error">{error}</div>}
+      {notice && <div className="msg msg-notice">{notice}</div>}
       <div ref={bottomRef} />
     </div>
   )

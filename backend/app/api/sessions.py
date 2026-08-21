@@ -7,10 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..agent import runner
 from ..auth.routes import get_current_user
+from ..config import get_settings
 from ..db import get_db
 from ..models import ChatSession, Event, Message, User, _now
 from ..providers.registry import PROVIDERS
-from ..settings_store import get_setting
+from ..ratelimit import enforce_rate_limit
+from ..settings_store import CAPABILITIES, get_setting
+from ..sharing import is_shared
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -27,6 +30,8 @@ class SendMessageRequest(BaseModel):
 class UpdateSessionRequest(BaseModel):
     provider: str = ""
     model: str | None = None
+    shared: bool | None = None
+    capability: str | None = None
 
 
 async def get_owned_session(
@@ -40,13 +45,31 @@ async def get_owned_session(
     return session
 
 
-def _session_dict(s: ChatSession) -> dict:
+async def get_readable_session(
+    session_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ChatSession:
+    """Owner gets full access; any authenticated user may read a shared session.
+    Subagent sessions inherit shared visibility from their parent (depth 1)."""
+    session = await db.get(ChatSession, session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found")
+    if session.user_id != user.id and not await is_shared(db, session):
+        raise HTTPException(404, "Session not found")
+    return session
+
+
+def _session_dict(s: ChatSession, user_id: str | None = None) -> dict:
     return {
         "id": s.id,
         "title": s.title,
         "provider": s.provider,
         "model": s.model,
         "kind": s.kind,
+        "shared": s.shared,
+        "capability": (s.settings_json or {}).get("capability", "smart"),
+        "owned": user_id is None or s.user_id == user_id,
         "created_at": s.created_at.isoformat(),
         "updated_at": s.updated_at.isoformat(),
     }
@@ -87,8 +110,11 @@ async def create_session(
 
 
 @router.get("/{session_id}")
-async def get_session(session: ChatSession = Depends(get_owned_session)):
-    return _session_dict(session)
+async def get_session(
+    session: ChatSession = Depends(get_readable_session),
+    user: User = Depends(get_current_user),
+):
+    return _session_dict(session, user.id)
 
 
 @router.patch("/{session_id}")
@@ -97,10 +123,12 @@ async def update_session(
     session: ChatSession = Depends(get_owned_session),
     db: AsyncSession = Depends(get_db),
 ):
-    """Change provider/model for a session. Providers may only switch between
-    runs — mid-tool-loop switches would break reasoning continuity."""
-    if runner.is_running(session.id):
-        raise HTTPException(409, "Cannot change provider while a run is in progress")
+    """Change provider/model/capability/sharing for a session. Provider, model,
+    and capability may only switch between runs — mid-tool-loop switches would
+    break reasoning continuity. Sharing can be toggled at any time."""
+    changes_model = bool(body.provider) or body.model is not None or body.capability is not None
+    if changes_model and runner.is_running(session.id):
+        raise HTTPException(409, "Cannot change provider/model while a run is in progress")
     if body.provider:
         if body.provider not in PROVIDERS:
             raise HTTPException(400, f"Unknown provider: {body.provider}")
@@ -112,6 +140,13 @@ async def update_session(
                 session.model = ""
     if body.model is not None:
         session.model = body.model
+    if body.shared is not None:
+        session.shared = body.shared
+    if body.capability is not None:
+        if body.capability not in CAPABILITIES:
+            raise HTTPException(400, f"Unknown capability: {body.capability}")
+        # Reassign so SQLAlchemy detects the JSON column change.
+        session.settings_json = {**(session.settings_json or {}), "capability": body.capability}
     await db.commit()
     await db.refresh(session)
     return _session_dict(session)
@@ -164,7 +199,7 @@ async def delete_session(
 
 @router.get("/{session_id}/messages")
 async def list_messages(
-    session: ChatSession = Depends(get_owned_session),
+    session: ChatSession = Depends(get_readable_session),
     db: AsyncSession = Depends(get_db),
 ):
     rows = (
@@ -204,6 +239,7 @@ async def send_message(
     text = body.text.strip()
     if not text:
         raise HTTPException(400, "Empty message")
+    enforce_rate_limit("runs", user.id, get_settings().rate_limit_runs_per_minute)
     if not runner.try_reserve_run(session.id):
         raise HTTPException(409, "A run is already in progress for this session")
     try:
@@ -233,7 +269,7 @@ async def cancel(session: ChatSession = Depends(get_owned_session)):
 
 @router.get("/{session_id}/events")
 async def list_events(
-    session: ChatSession = Depends(get_owned_session),
+    session: ChatSession = Depends(get_readable_session),
     db: AsyncSession = Depends(get_db),
 ):
     rows = (
