@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     max_subagents: int = 5
     subagent_concurrency: int = 3
     max_steps_per_subagent_run: int = 15
-    subagent_timeout_seconds: int = 900
+    subagent_timeout_seconds: int = 900  # per child run
 
 
 @lru_cache
