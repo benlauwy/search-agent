@@ -265,7 +265,7 @@ export default function App() {
       {active && <FilesPanel files={chat.files} onUpload={chat.upload} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       {showTrace && activeId && (
-        <TraceView sessionId={activeId} onClose={() => setShowTrace(false)} />
+        <TraceView key={activeId} sessionId={activeId} onClose={() => setShowTrace(false)} />
       )}
     </div>
   )
