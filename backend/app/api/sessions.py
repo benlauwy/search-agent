@@ -123,10 +123,12 @@ async def update_session(
     session: ChatSession = Depends(get_owned_session),
     db: AsyncSession = Depends(get_db),
 ):
-    """Change provider/model for a session. Providers may only switch between
-    runs — mid-tool-loop switches would break reasoning continuity."""
-    if runner.is_running(session.id):
-        raise HTTPException(409, "Cannot change provider while a run is in progress")
+    """Change provider/model/capability/sharing for a session. Provider, model,
+    and capability may only switch between runs — mid-tool-loop switches would
+    break reasoning continuity. Sharing can be toggled at any time."""
+    changes_model = bool(body.provider) or body.model is not None or body.capability is not None
+    if changes_model and runner.is_running(session.id):
+        raise HTTPException(409, "Cannot change provider/model while a run is in progress")
     if body.provider:
         if body.provider not in PROVIDERS:
             raise HTTPException(400, f"Unknown provider: {body.provider}")
